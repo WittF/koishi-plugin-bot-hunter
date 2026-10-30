@@ -40,7 +40,7 @@ export const Config: Schema<Config> = Schema.object({
       name: Schema.string().required().description('规则名，用于日志与记录。'),
       trigger: Schema.string().required().description('探测命令全文，例如 `#sl`。operator 发出后开始计时。'),
       windowMs: Schema.natural()
-        .default(300)
+        .default(1000)
         .description('计时窗口（毫秒）。只有在窗口内到达且命中特征的回复才处置；超窗的命中只记日志。'),
       patterns: Schema.array(String)
         .role('table')
@@ -56,7 +56,7 @@ export const Config: Schema<Config> = Schema.object({
       {
         name: 'sl',
         trigger: '#sl',
-        windowMs: 300,
+        windowMs: 1000,
         patterns: ['SnowLuma\\s*状态'],
         muteSeconds: DEFAULT_MUTE_SECONDS,
         enabled: true,
@@ -81,7 +81,7 @@ export interface BanRecord {
   muteSeconds: number
   expiresAt: Date
   active: boolean
-  releasedAt: Date
+  releasedAt: Date | null
   releasedBy: string
   note: string
 }
@@ -99,7 +99,7 @@ interface CompiledRule extends Rule {
 interface ArmedState {
   rule: CompiledRule
   at: number
-  /** 本次探测里已处置过的 userId，避免同一 Bot 连发两条被记两次 */
+  /** 本次探测里已处置过的 userId。判重时看同群所有探测状态，避免叠加触发或多规则同时命中把同一人处置两次 */
   hits: Set<string>
 }
 
@@ -198,21 +198,28 @@ export function apply(ctx: Context, config: Config) {
       return
     }
     const mutedAt = new Date()
-    await ctx.database.create('bot_hunter_ban', {
-      platform: session.platform,
-      guildId,
-      userId,
-      rule: rule.name,
-      trigger: rule.trigger,
-      delayMs,
-      content: text.slice(0, 500),
-      mutedAt,
-      muteSeconds: rule.muteSeconds,
-      expiresAt: new Date(mutedAt.getTime() + rule.muteSeconds * 1000),
-      active: true,
-      releasedBy: '',
-      note: '',
-    })
+    try {
+      await ctx.database.create('bot_hunter_ban', {
+        platform: session.platform,
+        guildId,
+        userId,
+        rule: rule.name,
+        trigger: rule.trigger,
+        delayMs,
+        content: text.slice(0, 500),
+        mutedAt,
+        muteSeconds: rule.muteSeconds,
+        expiresAt: new Date(mutedAt.getTime() + rule.muteSeconds * 1000),
+        active: true,
+        releasedBy: '',
+        note: '',
+      })
+    } catch (e) {
+      logger.warn(
+        `[${rule.name}] 群 ${guildId} 已禁言 ${who(session)} ${rule.muteSeconds}s（${delayMs}ms 命中），但记录写入失败，unban 找不到此人、需手动解禁：${(e as Error)?.message ?? e}`,
+      )
+      return
+    }
     logger.info(`[${rule.name}] 群 ${guildId} 已禁言 ${who(session)} ${rule.muteSeconds}s（${delayMs}ms 回复命中特征）`)
   }
 
@@ -241,6 +248,8 @@ export function apply(ctx: Context, config: Config) {
         releasedAt: new Date(),
         releasedBy: session.userId!,
       })
+      // 解禁后本群进行中的探测不再把这个人当"已处置"，下一次探测可以重新命中
+      for (const s of armed.get(keyOf(session)) ?? []) s.hits.delete(r.userId)
       ok++
       logger.info(`[unban] 群 ${guildId} 已解禁 ${r.userId}（记录 #${r.id}，${trigger}，由 ${session.userId} 操作）`)
     }
@@ -258,17 +267,25 @@ export function apply(ctx: Context, config: Config) {
     if (operators.has(session.userId)) {
       const rule = rules.find((r) => r.enabled && text === r.trigger)
       if (rule) {
-        list.push({ rule, at: now, hits: new Set() })
-        armed.set(key, list)
+        // 同一规则再次触发 = 重新计时，替换旧状态而不是叠加，避免一条回复落在两个窗口里
+        const rest = list.filter((s) => s.rule.name !== rule.name)
+        rest.push({ rule, at: now, hits: new Set() })
+        armed.set(key, rest)
         logger.info(`[${rule.name}] 群 ${session.guildId} 由 ${who(session)} 触发，窗口 ${rule.windowMs}ms`)
         return
       }
       const m = text.match(unbanRe)
-      if (m) await unban(session, m[1])
+      if (m) {
+        const raw = m[1]
+        const trigger = rules.find((r) => r.trigger.toLowerCase() === raw.toLowerCase())?.trigger ?? raw
+        await unban(session, trigger)
+      }
       return
     }
 
     if (!list.length) return
+    // 本轮已处置过（任一规则）就不再碰
+    if (list.some((s) => s.hits.has(session.userId!))) return
     for (const state of list) {
       const { rule } = state
       const delayMs = now - state.at
@@ -285,9 +302,10 @@ export function apply(ctx: Context, config: Config) {
         logger.info(`[${rule.name}] 群 ${session.guildId} ${who(session)} +${delayMs}ms 命中但在豁免名单，未处置`)
         continue
       }
-      if (state.hits.has(session.userId)) continue
-      state.hits.add(session.userId)
+      // 先占位再 await，同一 tick 连到两条也只处置一次
+      for (const s of list) s.hits.add(session.userId)
       await punish(session, state, delayMs, text)
+      break
     }
   }
 

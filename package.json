@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-bot-hunter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "[WittF自用] 自动处置异常 QQ Bot：管理员发出探测命令（如 #sl）后，在极短时间窗内回复出特征文本的群成员自动禁言，支持按规则一键解禁。",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
