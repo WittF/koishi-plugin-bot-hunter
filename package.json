@@ -34,7 +34,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test test/"
+    "test": "npm run build && node --test test/*.test.js"
   },
   "peerDependencies": {
     "koishi": "^4.18.0"
