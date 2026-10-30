@@ -1,0 +1,47 @@
+{
+  "name": "koishi-plugin-bot-hunter",
+  "version": "0.1.0",
+  "description": "[WittF自用] 自动处置异常 QQ Bot：管理员发出探测命令（如 #sl）后，在极短时间窗内回复出特征文本的群成员自动禁言，支持按规则一键解禁。",
+  "main": "lib/index.js",
+  "typings": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "readme.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WittF/koishi-plugin-bot-hunter.git"
+  },
+  "keywords": [
+    "chatbot",
+    "koishi",
+    "plugin",
+    "qq",
+    "onebot",
+    "admin",
+    "anti-bot"
+  ],
+  "koishi": {
+    "description": {
+      "zh": "[WittF自用] 自动处置异常 QQ Bot：管理员发出探测命令（如 #sl）后，在极短时间窗内回复出特征文本的群成员自动禁言，支持按规则一键解禁。"
+    },
+    "service": {
+      "required": [
+        "database"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test test/"
+  },
+  "peerDependencies": {
+    "koishi": "^4.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "koishi": "^4.18.11",
+    "typescript": "^5.6.0"
+  }
+}
